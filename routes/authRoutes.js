@@ -18,6 +18,8 @@ router.post("/send-email-otp", (req, res) => {
   const otp = generateOtp();
   const expires = new Date(Date.now() + 5 * 60000);
 
+  console.log(`Attempting to send OTP to: ${email}`);
+
   db.query(
     `INSERT INTO email_otp (email, otp, expires_at)
      VALUES (?, ?, ?)
@@ -25,16 +27,20 @@ router.post("/send-email-otp", (req, res) => {
     [email, otp, expires, otp, expires],
     async (err) => {
       if (err) {
-        console.error("DB ERROR:", err);
-        return res.status(500).json({ message: "OTP database error" });
+        console.error("DATABASE ERROR in send-email-otp:", err);
+        return res.status(500).json({
+          message: "OTP database error",
+          error: err.code === 'ER_NO_SUCH_TABLE' ? 'email_otp table missing' : 'Internal error'
+        });
       }
 
       try {
         await sendEmailOtp(email, otp);
+        console.log(`OTP sent successfully to: ${email}`);
         res.json({ message: "OTP sent to email" });
       } catch (error) {
-        console.error("EMAIL ERROR:", error);
-        res.status(500).json({ message: "Email sending failed" });
+        console.error("EMAIL ERROR in send-email-otp:", error);
+        res.status(500).json({ message: "Email sending failed. Internal error." });
       }
     }
   );
