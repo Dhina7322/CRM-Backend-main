@@ -50,7 +50,7 @@ const sendEmailOtp = async (email, otp) => {
     return info;
   } catch (error) {
     console.error("Mailer Error:", error);
-    const mailError = new Error("Failed to send OTP email");
+    const mailError = new Error(error.message || "Failed to send OTP email");
     mailError.name = "EmailError";
     throw mailError;
   }

@@ -79,7 +79,8 @@ router.post("/send-email-otp", async (req, res) => {
     return res.status(statusCode).json({
       success: false,
       message: "Failed to send OTP. Please try again later.",
-      debug: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: error.message, // This will show the exact error in your browser console
+      error_name: error.name
     });
   }
 });
