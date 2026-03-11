@@ -8,42 +8,80 @@ const sendEmailOtp = require("../backendutil/sendSms");
 const router = express.Router();
 
 /* ================= SEND EMAIL OTP ================= */
-router.post("/send-email-otp", (req, res) => {
+router.post("/send-email-otp", async (req, res) => {
   const { email } = req.body;
 
+  // 1. Validate email input
   if (!email) {
-    return res.status(400).json({ message: "Email required" });
+    return res.status(400).json({ success: false, message: "Email is required" });
   }
 
-  const otp = generateOtp();
-  const expires = new Date(Date.now() + 5 * 60000);
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ success: false, message: "Invalid email format" });
+  }
 
-  console.log(`Attempting to send OTP to: ${email}`);
+  try {
+    const otp = generateOtp();
+    const expires = new Date(Date.now() + 5 * 60000); // 5 minutes
 
-  db.query(
-    `INSERT INTO email_otp (email, otp, expires_at)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE otp=?, expires_at=?`,
-    [email, otp, expires, otp, expires],
-    async (err) => {
-      if (err) {
-        console.error("DATABASE ERROR in send-email-otp:", err);
-        return res.status(500).json({
-          message: "OTP database error",
-          error: err.code === 'ER_NO_SUCH_TABLE' ? 'email_otp table missing' : 'Internal error'
-        });
-      }
+    console.log(`[AUTH] Requesting OTP for: ${email}`);
 
-      try {
-        await sendEmailOtp(email, otp);
-        console.log(`OTP sent successfully to: ${email}`);
-        res.json({ message: "OTP sent to email" });
-      } catch (error) {
-        console.error("EMAIL ERROR in send-email-otp:", error);
-        res.status(500).json({ message: "Email sending failed. Internal error." });
+    // 2. Ensure the table exists or just query directly. 
+    // Usually, you should run migrations, but for simplicity here we'll handle the query.
+    // Use .promise() to handle multiple async operations cleanly.
+    try {
+      await db.promise().query(
+        `INSERT INTO email_otp (email, otp, expires_at)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE otp=?, expires_at=?`,
+        [email, otp, expires, otp, expires]
+      );
+    } catch (dbErr) {
+      console.error("[DATABASE ERROR]:", dbErr.message);
+
+      // If table is missing, tell the user or create it.
+      if (dbErr.code === 'ER_NO_SUCH_TABLE') {
+        console.log("[DATABASE] Creating 'email_otp' table...");
+        await db.promise().query(`
+          CREATE TABLE IF NOT EXISTS email_otp (
+            email VARCHAR(255) PRIMARY KEY,
+            otp VARCHAR(6) NOT NULL,
+            expires_at DATETIME NOT NULL
+          )
+        `);
+        // Retry the insert
+        await db.promise().query(
+          `INSERT INTO email_otp (email, otp, expires_at)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE otp=?, expires_at=?`,
+          [email, otp, expires, otp, expires]
+        );
+      } else {
+        throw dbErr;
       }
     }
-  );
+
+    // 3. Send email using nodemailer
+    await sendEmailOtp(email, otp);
+    console.log(`[AUTH] OTP sent successfully to: ${email}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully to your email."
+    });
+
+  } catch (error) {
+    console.error("[AUTH ERROR]:", error);
+
+    // Check for common error types
+    const statusCode = error.name === 'EmailError' ? 503 : 500;
+    return res.status(statusCode).json({
+      success: false,
+      message: "Failed to send OTP. Please try again later.",
+      debug: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
 /*  REGISTER  */
